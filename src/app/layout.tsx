@@ -1,14 +1,23 @@
-import type { Metadata } from 'next';
+import type { Metadata, Viewport } from 'next';
 import { Inter } from 'next/font/google';
 import './globals.css';
 import { AuthProvider } from '@/context/AuthContext';
 import PopupChecker from '@/components/PopupChecker';
+import InstallHint from '@/components/InstallHint';
 
 const inter = Inter({ subsets: ['latin'] });
 
 export const metadata: Metadata = {
   title: 'CFB Pick\'em',
   description: 'College Football Pick\'em with friends',
+  appleWebApp: {
+    title: 'CFB Pick\'em',
+    statusBarStyle: 'black-translucent',
+  },
+};
+
+export const viewport: Viewport = {
+  themeColor: '#030712',
 };
 
 export default function RootLayout({
@@ -23,6 +32,7 @@ export default function RootLayout({
           <PopupChecker>
             {children}
           </PopupChecker>
+          <InstallHint />
         </AuthProvider>
       </body>
     </html>
