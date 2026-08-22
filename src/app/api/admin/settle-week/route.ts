@@ -13,11 +13,12 @@ export async function POST(request: Request) {
         return NextResponse.json({ success: false, error: 'Odds API key not configured' }, { status: 500 });
       }
 
-      const scoresUrl = `https://api.the-odds-api.com/v4/sports/baseball_mlb/scores?apiKey=${oddsApiKey}&daysFrom=5`;
+      const scoresUrl = `https://api.the-odds-api.com/v4/sports/baseball_mlb/scores?apiKey=${oddsApiKey}&daysFrom=3`;
       const scoresRes = await fetch(scoresUrl);
 
       if (!scoresRes.ok) {
-        return NextResponse.json({ success: false, error: 'Scores API request failed' }, { status: 502 });
+        const errorText = await scoresRes.text();
+        return NextResponse.json({ success: false, error: `Scores API request failed: ${errorText}` }, { status: 502 });
       }
 
       const apiScores = await scoresRes.json();

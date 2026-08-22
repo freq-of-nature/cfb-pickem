@@ -38,11 +38,12 @@ export async function GET(request: Request) {
 
     for (const week of unsettledWeeks) {
       // Fetch scores from API
-      const scoresUrl = `https://api.the-odds-api.com/v4/sports/baseball_mlb/scores?apiKey=${oddsApiKey}&daysFrom=5`;
+      const scoresUrl = `https://api.the-odds-api.com/v4/sports/baseball_mlb/scores?apiKey=${oddsApiKey}&daysFrom=3`;
       const scoresRes = await fetch(scoresUrl);
 
       if (!scoresRes.ok) {
-        results.push({ weekId: week.id, weekNumber: week.week_number, status: 'api_error' });
+        const errorText = await scoresRes.text();
+        results.push({ weekId: week.id, weekNumber: week.week_number, status: 'api_error', error: errorText });
         continue;
       }
 
