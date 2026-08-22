@@ -13,7 +13,7 @@ export async function POST(request: Request) {
         return NextResponse.json({ success: false, error: 'Odds API key not configured' }, { status: 500 });
       }
 
-      const scoresUrl = `https://api.the-odds-api.com/v4/sports/americanfootball_ncaaf/scores?apiKey=${oddsApiKey}&daysFrom=3`;
+      const scoresUrl = `https://api.the-odds-api.com/v4/sports/baseball_mlb/scores?apiKey=${oddsApiKey}&daysFrom=5`;
       const scoresRes = await fetch(scoresUrl);
 
       if (!scoresRes.ok) {

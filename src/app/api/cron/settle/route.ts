@@ -38,7 +38,7 @@ export async function GET(request: Request) {
 
     for (const week of unsettledWeeks) {
       // Fetch scores from API
-      const scoresUrl = `https://api.the-odds-api.com/v4/sports/baseball_mlb/scores?apiKey=${oddsApiKey}&daysFrom=3`;
+      const scoresUrl = `https://api.the-odds-api.com/v4/sports/baseball_mlb/scores?apiKey=${oddsApiKey}&daysFrom=5`;
       const scoresRes = await fetch(scoresUrl);
 
       if (!scoresRes.ok) {
