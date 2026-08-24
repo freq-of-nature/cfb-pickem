@@ -23,7 +23,7 @@ export async function POST(request: Request) {
     }
 
     // Fetch fresh odds
-    const oddsUrl = `https://api.the-odds-api.com/v4/sports/baseball_mlb/odds?regions=us&markets=spreads&oddsFormat=american&apiKey=${oddsApiKey}`;
+    const oddsUrl = `https://api.the-odds-api.com/v4/sports/americanfootball_ncaaf/odds?regions=us&markets=spreads&oddsFormat=american&apiKey=${oddsApiKey}`;
     const oddsRes = await fetch(oddsUrl);
 
     if (!oddsRes.ok) {
