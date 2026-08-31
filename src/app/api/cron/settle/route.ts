@@ -147,6 +147,8 @@ export async function GET(request: Request) {
         .select('user_id, is_correct, game_id')
         .in('game_id', games.map(g => g.id));
 
+      const gotwGameIds = new Set(games.filter(g => g.is_game_of_week).map(g => g.id));
+
       const userCounts: Record<string, number> = {};
       const { data: allUsers } = await supabase.from('users').select('id');
 
@@ -156,7 +158,8 @@ export async function GET(request: Request) {
       if (allPicks) {
         for (const pick of allPicks) {
           if (pick.is_correct === true) {
-            userCounts[pick.user_id] = (userCounts[pick.user_id] || 0) + 1;
+            const points = gotwGameIds.has(pick.game_id) ? 2 : 1;
+            userCounts[pick.user_id] = (userCounts[pick.user_id] || 0) + points;
           }
         }
       }
@@ -165,15 +168,15 @@ export async function GET(request: Request) {
       const maxCorrect = counts.length > 0 ? Math.max(...counts) : 0;
       const minCorrect = counts.length > 0 ? Math.min(...counts) : 0;
 
-      for (const [userId, correctCount] of Object.entries(userCounts)) {
+      for (const [userId, points] of Object.entries(userCounts)) {
         await supabase
           .from('weekly_results')
           .upsert({
             user_id: userId,
             week_id: week.id,
-            correct_count: correctCount,
-            is_weekly_winner: correctCount === maxCorrect,
-            is_weekly_loser: correctCount === minCorrect,
+            points: points,
+            is_weekly_winner: points === maxCorrect,
+            is_weekly_loser: points === minCorrect,
             has_seen_popup: false,
           }, { onConflict: 'user_id,week_id' });
       }

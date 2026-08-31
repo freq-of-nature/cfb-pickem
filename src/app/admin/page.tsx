@@ -109,6 +109,7 @@ export default function AdminPage() {
   }
 
   const selectedWeek = weeks.find(w => w.id === selectedWeekId);
+  const isWeekLocked = selectedWeek?.picks_lock_at ? new Date(selectedWeek.picks_lock_at) <= new Date() : false;
 
   const handleCreateWeek = async () => {
     setSlateStatus('Creating week...');
@@ -291,6 +292,23 @@ export default function AdminPage() {
       await fetchWeeks();
     } else {
       setMessageStatus(`Error: ${data.error}`);
+    }
+  };
+
+  const handleSetGameOfWeek = async (gameId: string) => {
+    if (!selectedWeekId) return;
+
+    const res = await fetch('/api/admin/set-game-of-week', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ gameId, weekId: selectedWeekId }),
+    });
+    const data = await res.json();
+
+    if (data.success) {
+      await fetchGames(selectedWeekId);
+    } else {
+      setSlateStatus(`Error: ${data.error}`);
     }
   };
 
@@ -505,8 +523,14 @@ export default function AdminPage() {
                     </div>
                     <div className="divide-y divide-gray-800">
                       {games.map(game => (
-                        <div key={game.id} className="p-4 flex items-center justify-between">
+                        <div
+                          key={game.id}
+                          className={`p-4 flex items-center justify-between ${game.is_game_of_week ? 'bg-yellow-500/5' : ''}`}
+                        >
                           <div className="flex-1 min-w-0">
+                            {game.is_game_of_week && (
+                              <div className="text-xs font-semibold text-yellow-400 mb-1">⭐ Game of the Week</div>
+                            )}
                             <div className="text-white font-medium">
                               {game.away_team} @ {game.home_team}
                             </div>
@@ -525,10 +549,21 @@ export default function AdminPage() {
                               )}
                             </div>
                           </div>
+                          {!selectedWeek?.is_settled && !isWeekLocked && (
+                            <button
+                              onClick={() => handleSetGameOfWeek(game.id)}
+                              className={`ml-3 p-2 transition-colors ${
+                                game.is_game_of_week ? 'text-yellow-400 hover:text-yellow-300' : 'text-gray-500 hover:text-yellow-400'
+                              }`}
+                              title={game.is_game_of_week ? 'Unset Game of the Week' : 'Set as Game of the Week'}
+                            >
+                              ⭐
+                            </button>
+                          )}
                           {!selectedWeek?.is_settled && (
                             <button
                               onClick={() => handleDeleteGame(game.id)}
-                              className="ml-3 p-2 text-gray-500 hover:text-red-400 transition-colors"
+                              className="p-2 text-gray-500 hover:text-red-400 transition-colors"
                               title="Remove game"
                             >
                               ✕
@@ -684,9 +719,12 @@ export default function AdminPage() {
                     </div>
                     <div className="divide-y divide-gray-800">
                       {games.map(game => (
-                        <div key={game.id} className="p-4">
+                        <div key={game.id} className={`p-4 ${game.is_game_of_week ? 'bg-yellow-500/5' : ''}`}>
                           <div className="flex items-center justify-between">
                             <div>
+                              {game.is_game_of_week && (
+                                <div className="text-xs font-semibold text-yellow-400 mb-1">⭐ Game of the Week (2x)</div>
+                              )}
                               <div className="text-white font-medium">
                                 {game.away_team} @ {game.home_team}
                               </div>

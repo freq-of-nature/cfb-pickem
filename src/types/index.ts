@@ -43,6 +43,7 @@ export interface Game {
   away_score: number | null;
   is_final: boolean;
   winning_side: string | null;
+  is_game_of_week: boolean;
 }
 
 export interface Pick {
@@ -59,7 +60,7 @@ export interface WeeklyResult {
   id: string;
   user_id: string;
   week_id: number;
-  correct_count: number;
+  points: number;
   is_weekly_winner: boolean;
   is_weekly_loser: boolean;
   has_seen_popup: boolean;

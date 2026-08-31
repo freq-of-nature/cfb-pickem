@@ -126,15 +126,18 @@ export async function POST(request: Request) {
     // Calculate weekly results for each user
     const { data: allPicks } = await supabase
       .from('picks')
-      .select('user_id, is_correct, game:games!inner(week_id)')
+      .select('user_id, is_correct, game:games!inner(week_id, is_game_of_week)')
       .eq('games.week_id', weekId);
 
-    // Group by user
+    // Group by user — Game of the Week picks are worth 2 points instead of 1
     const userCounts: Record<string, number> = {};
     if (allPicks) {
       for (const pick of allPicks) {
         if (!userCounts[pick.user_id]) userCounts[pick.user_id] = 0;
-        if (pick.is_correct === true) userCounts[pick.user_id]++;
+        if (pick.is_correct === true) {
+          const game = pick.game as unknown as { is_game_of_week: boolean };
+          userCounts[pick.user_id] += game.is_game_of_week ? 2 : 1;
+        }
       }
     }
 
@@ -154,21 +157,21 @@ export async function POST(request: Request) {
     // Get previous season rankings for rank change calculation
     const { data: prevResults } = await supabase
       .from('weekly_results')
-      .select('user_id, correct_count, week_id')
+      .select('user_id, points, week_id')
       .eq('week_id', weekId - 1);
 
     // Calculate cumulative totals before this week for ranking
     // (We'll need all previous weekly_results)
     const { data: allPrevResults } = await supabase
       .from('weekly_results')
-      .select('user_id, correct_count')
+      .select('user_id, points')
       .lt('week_id', weekId);
 
     const prevTotals: Record<string, number> = {};
     if (allPrevResults) {
       for (const r of allPrevResults) {
         if (!prevTotals[r.user_id]) prevTotals[r.user_id] = 0;
-        prevTotals[r.user_id] += r.correct_count;
+        prevTotals[r.user_id] += r.points;
       }
     }
 
@@ -198,7 +201,7 @@ export async function POST(request: Request) {
         .upsert({
           user_id: userId,
           week_id: weekId,
-          correct_count: correctCount,
+          points: correctCount,
           is_weekly_winner: correctCount === maxCorrect,
           is_weekly_loser: correctCount === minCorrect,
           has_seen_popup: false,
@@ -218,7 +221,7 @@ export async function POST(request: Request) {
       success: true,
       results: Object.entries(userCounts).map(([userId, count]) => ({
         userId,
-        correctCount: count,
+        points: count,
         isWinner: count === maxCorrect,
         isLoser: count === minCorrect,
       })),

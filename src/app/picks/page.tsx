@@ -423,8 +423,19 @@ export default function PicksPage() {
                   return (
                     <div
                       key={game.id}
-                      className={`bg-gray-900 rounded-xl border border-gray-800 overflow-hidden ${isSaving ? 'opacity-70' : ''}`}
+                      className={`bg-gray-900 rounded-xl border overflow-hidden ${
+                        game.is_game_of_week ? 'border-yellow-500/70' : 'border-gray-800'
+                      } ${isSaving ? 'opacity-70' : ''}`}
                     >
+                      {/* Game of the Week badge */}
+                      {game.is_game_of_week && (
+                        <div className="px-3 py-1 bg-yellow-500/10 border-b border-yellow-500/30">
+                          <span className="text-xs font-semibold text-yellow-400">
+                            ⭐ Game of the Week · Worth 2 points
+                          </span>
+                        </div>
+                      )}
+
                       {/* Game info bar */}
                       <div className="flex items-center justify-between px-3 py-1.5 bg-gray-800/50">
                         <span className="text-xs text-gray-500">{formatKickoff(game.kickoff_time)}</span>

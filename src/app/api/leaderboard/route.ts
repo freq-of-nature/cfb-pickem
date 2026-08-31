@@ -36,7 +36,7 @@ export async function GET() {
     }
     for (const r of results) {
       if (!totals[r.user_id]) totals[r.user_id] = 0;
-      totals[r.user_id] += r.correct_count;
+      totals[r.user_id] += r.points;
     }
 
     // Sort by total descending
@@ -70,7 +70,7 @@ export async function GET() {
         // Sum all results up to and including this week
         const cumulative = results
           .filter(r => r.user_id === user.id && r.week_id <= week.id)
-          .reduce((sum, r) => sum + r.correct_count, 0);
+          .reduce((sum, r) => sum + r.points, 0);
         point[user.id] = cumulative;
       }
 
@@ -93,7 +93,7 @@ export async function GET() {
             userId: l.user_id,
             firstName: user?.first_name || '',
             lastName: user?.last_name || '',
-            correctCount: l.correct_count,
+            points: l.points,
           };
         }),
       };

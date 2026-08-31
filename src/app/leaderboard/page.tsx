@@ -21,7 +21,7 @@ interface StandingEntry {
 interface WeeklyResultEntry {
   user_id: string;
   week_id: number;
-  correct_count: number;
+  points: number;
   is_weekly_winner: boolean;
   is_weekly_loser: boolean;
 }
@@ -44,7 +44,7 @@ interface WeekEntry {
 
 interface WallOfShameData {
   week: WeekEntry;
-  losers: { userId: string; firstName: string; lastName: string; correctCount: number }[];
+  losers: { userId: string; firstName: string; lastName: string; points: number }[];
 }
 
 export default function LeaderboardPage() {
@@ -104,7 +104,7 @@ export default function LeaderboardPage() {
   // Weekly data for selected week
   const weeklyResults = results
     .filter(r => r.week_id === selectedWeekId)
-    .sort((a, b) => b.correct_count - a.correct_count);
+    .sort((a, b) => b.points - a.points);
 
   // Trend chart dimensions
   const chartWidth = 600;
@@ -262,7 +262,7 @@ export default function LeaderboardPage() {
                               {userEntry.first_name} {userEntry.last_name}
                             </span>
                           </div>
-                          <span className="text-white font-bold">{result.correct_count}</span>
+                          <span className="text-white font-bold">{result.points}</span>
                         </div>
                       );
                     })}
@@ -378,7 +378,7 @@ export default function LeaderboardPage() {
                           </span>
                         ))}
                         <p className="text-red-400/70 text-sm mt-1">
-                          {wallOfShame.losers[0].correctCount} correct pick{wallOfShame.losers[0].correctCount !== 1 ? 's' : ''} 😬
+                          {wallOfShame.losers[0].points} point{wallOfShame.losers[0].points !== 1 ? 's' : ''} 😬
                         </p>
                       </div>
 
