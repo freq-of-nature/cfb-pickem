@@ -47,6 +47,9 @@ export default function AdminPage() {
   // Settle tab state
   const [settleStatus, setSettleStatus] = useState('');
 
+  // Reminder state
+  const [reminderStatus, setReminderStatus] = useState('');
+
   // Messages tab state
   const [winnerMessage, setWinnerMessage] = useState('');
   const [winnerImageUrl, setWinnerImageUrl] = useState('');
@@ -207,6 +210,28 @@ export default function AdminPage() {
       setSlateStatus(`Error: ${data.error}`);
     }
     setIsProcessing(false);
+  };
+
+  const handleSendReminder = async () => {
+    if (!selectedWeekId) return;
+    setReminderStatus('Sending reminders...');
+
+    const res = await fetch('/api/admin/send-reminder', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ weekId: selectedWeekId }),
+    });
+    const data = await res.json();
+
+    if (data.success) {
+      setReminderStatus(
+        `Sent to ${data.sent}/${data.targeted} player(s) with incomplete picks.` +
+        (data.pruned ? ` Removed ${data.pruned} expired subscription(s).` : '')
+      );
+      await fetchWeeks();
+    } else {
+      setReminderStatus(`Error: ${data.error}`);
+    }
   };
 
   const handleDeleteGame = async (gameId: string) => {
@@ -427,6 +452,37 @@ export default function AdminPage() {
                           })
                         : 'N/A'}
                     </p>
+                  </div>
+                )}
+
+                {selectedWeek?.slate_published_at && !selectedWeek?.is_settled && (
+                  <div className="bg-gray-900 rounded-xl border border-gray-800 p-4">
+                    <h2 className="text-lg font-semibold mb-2">🔔 Pick Reminders</h2>
+                    <p className="text-sm text-gray-400 mb-3">
+                      Notifies anyone with incomplete picks for this week. Sends automatically ~1 day before lock, or trigger it manually below.
+                    </p>
+                    <div className="flex items-center gap-3">
+                      <button
+                        onClick={handleSendReminder}
+                        className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium"
+                      >
+                        Send Reminder Now
+                      </button>
+                      {selectedWeek?.reminder_sent_at && (
+                        <span className="text-xs text-gray-500">
+                          Last sent{' '}
+                          {new Date(selectedWeek.reminder_sent_at).toLocaleString('en-US', {
+                            month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
+                            timeZone: 'America/New_York', timeZoneName: 'short',
+                          })}
+                        </span>
+                      )}
+                    </div>
+                    {reminderStatus && (
+                      <p className={`text-sm mt-2 ${reminderStatus.startsWith('Error') ? 'text-red-400' : 'text-blue-400'}`}>
+                        {reminderStatus}
+                      </p>
+                    )}
                   </div>
                 )}
 

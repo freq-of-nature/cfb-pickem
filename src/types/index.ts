@@ -21,6 +21,7 @@ export interface Week {
   slate_published_at: string | null;
   picks_lock_at: string | null;
   is_settled: boolean;
+  reminder_sent_at: string | null;
   winner_message: string | null;
   winner_image_url: string | null;
   winner_video_url: string | null;

@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import NavBar from '@/components/NavBar';
+import PushNotificationManager from '@/components/PushNotificationManager';
 import { supabase } from '@/lib/supabase';
 import { SchoolColor } from '@/types';
 
@@ -80,6 +81,10 @@ export default function SettingsPage() {
       <NavBar />
       <main className="max-w-lg mx-auto px-4 py-6 pb-24">
         <h1 className="text-2xl font-bold mb-6">Settings</h1>
+
+        <div className="mb-6">
+          <PushNotificationManager />
+        </div>
 
         {/* Preview */}
         {selectedSchool && (
