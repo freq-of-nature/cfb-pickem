@@ -67,7 +67,7 @@ export default function PicksPage() {
       .not('slate_published_at', 'is', null)
       .order('week_number', { ascending: true });
     if (data && data.length > 0) {
-      setAllWeeks(data);
+      setAllWeeks(data as Week[]);
     }
   }, []);
 
@@ -92,7 +92,11 @@ export default function PicksPage() {
       .eq('week_id', weekId)
       .order('kickoff_time', { ascending: true });
 
-    if (gamesData) setGames(gamesData);
+    if (gamesData) {
+      // Game of the Week always leads the list, otherwise chronological (stable sort preserves that order)
+      const sorted = [...gamesData].sort((a, b) => Number(b.is_game_of_week) - Number(a.is_game_of_week));
+      setGames(sorted);
+    }
 
     // Fetch my picks
     if (userId) {

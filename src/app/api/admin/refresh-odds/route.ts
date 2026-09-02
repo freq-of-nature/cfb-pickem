@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getServiceClient } from '@/lib/supabase';
+import { getSpread } from '@/lib/odds';
 
 export async function POST(request: Request) {
   try {
@@ -39,44 +40,18 @@ export async function POST(request: Request) {
       const apiGame = apiGames.find((ag: { id: string }) => ag.id === game.api_game_id);
       if (!apiGame) continue;
 
-      // Find spread from first bookmaker
-      for (const book of apiGame.bookmakers) {
-        const spreadMarket = book.markets.find((m: { key: string }) => m.key === 'spreads');
-        if (spreadMarket && spreadMarket.outcomes.length >= 2) {
-          const favorite = spreadMarket.outcomes.find(
-            (o: { point?: number }) => o.point !== undefined && o.point < 0
-          );
-          if (favorite && favorite.point !== undefined) {
-            await supabase
-              .from('games')
-              .update({
-                spread_team: favorite.name,
-                spread_value: favorite.point,
-                kickoff_time: apiGame.commence_time,
-              })
-              .eq('id', game.id);
-            updated++;
-            break;
-          }
+      const spread = getSpread(apiGame);
+      if (!spread) continue;
 
-          // Pick'em case
-          const home = spreadMarket.outcomes.find(
-            (o: { name: string }) => o.name === apiGame.home_team
-          );
-          if (home && home.point !== undefined) {
-            await supabase
-              .from('games')
-              .update({
-                spread_team: home.name,
-                spread_value: home.point,
-                kickoff_time: apiGame.commence_time,
-              })
-              .eq('id', game.id);
-            updated++;
-            break;
-          }
-        }
-      }
+      await supabase
+        .from('games')
+        .update({
+          spread_team: spread.spreadTeam,
+          spread_value: spread.spreadValue,
+          kickoff_time: apiGame.commence_time,
+        })
+        .eq('id', game.id);
+      updated++;
     }
 
     return NextResponse.json({

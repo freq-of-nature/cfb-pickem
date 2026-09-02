@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getServiceClient } from '@/lib/supabase';
+import { getSpread } from '@/lib/odds';
 
 interface OddsGame {
   id: string;
@@ -48,31 +49,6 @@ function findBestMatch(inputName: string, apiGames: OddsGame[]): OddsGame | null
   return null;
 }
 
-function getSpread(game: OddsGame): { spreadTeam: string; spreadValue: number } | null {
-  // Use the first bookmaker that has spreads
-  for (const book of game.bookmakers) {
-    const spreadMarket = book.markets.find(m => m.key === 'spreads');
-    if (spreadMarket && spreadMarket.outcomes.length >= 2) {
-      // Find the favorite (negative spread)
-      const favorite = spreadMarket.outcomes.find(o => o.point !== undefined && o.point < 0);
-      if (favorite && favorite.point !== undefined) {
-        return {
-          spreadTeam: favorite.name,
-          spreadValue: favorite.point,
-        };
-      }
-      // If no negative spread, it might be a pick'em — use home team
-      const home = spreadMarket.outcomes.find(o => o.name === game.home_team);
-      if (home && home.point !== undefined) {
-        return {
-          spreadTeam: home.name,
-          spreadValue: home.point,
-        };
-      }
-    }
-  }
-  return null;
-}
 
 export async function POST(request: Request) {
   try {
