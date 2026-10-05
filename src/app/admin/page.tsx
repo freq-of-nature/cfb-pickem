@@ -16,6 +16,15 @@ interface AdminPickUser {
   last_name: string;
 }
 
+interface AdminWeekPoints {
+  id: string;
+  user_id: string;
+  points: number;
+  is_weekly_winner: boolean;
+  is_weekly_loser: boolean;
+  users: { first_name: string; last_name: string };
+}
+
 interface AdminParlayLeg {
   id: string;
   user_id: string;
@@ -64,6 +73,12 @@ export default function AdminPage() {
   const [parlayLegs, setParlayLegs] = useState<AdminParlayLeg[]>([]);
   const [parlayStatusMsg, setParlayStatusMsg] = useState('');
 
+  // Manual points editing (Settle tab)
+  const [weekPoints, setWeekPoints] = useState<AdminWeekPoints[]>([]);
+  const [pointDrafts, setPointDrafts] = useState<Record<string, string>>({});
+  const [pointsStatus, setPointsStatus] = useState('');
+  const [savingPointsFor, setSavingPointsFor] = useState<string | null>(null);
+
   // Reminder state
   const [reminderStatus, setReminderStatus] = useState('');
 
@@ -94,6 +109,20 @@ export default function AdminPage() {
     if (data) setGames(data);
   }, []);
 
+  const fetchWeekPoints = useCallback(async (weekId: number) => {
+    const res = await fetch(`/api/admin/week-points?weekId=${weekId}`);
+    const data = await res.json();
+    if (data.success) {
+      setWeekPoints(data.results);
+      // Reset drafts so the inputs reflect what's actually stored.
+      setPointDrafts(
+        Object.fromEntries(data.results.map((r: AdminWeekPoints) => [r.user_id, String(r.points)]))
+      );
+    } else {
+      setPointsStatus(`Error: ${data.error}`);
+    }
+  }, []);
+
   const fetchParlay = useCallback(async (weekId: number) => {
     const res = await fetch(`/api/parlay?weekId=${weekId}`);
     const data = await res.json();
@@ -110,6 +139,14 @@ export default function AdminPage() {
   useEffect(() => {
     if (selectedWeekId) {
       fetchGames(selectedWeekId);
+      // Points and parlay legs must follow the week selector too, not just a tab
+      // click — otherwise switching weeks leaves a stale list on screen and a
+      // save would apply to the newly selected week.
+      fetchWeekPoints(selectedWeekId);
+      fetchParlay(selectedWeekId);
+      // Don't carry a "saved" message from one week onto another.
+      setPointsStatus('');
+      setParlayStatusMsg('');
       // Load messages for selected week
       const week = weeks.find(w => w.id === selectedWeekId);
       if (week) {
@@ -121,7 +158,7 @@ export default function AdminPage() {
         setLoserVideoUrl(week.loser_video_url || '');
       }
     }
-  }, [selectedWeekId, weeks, fetchGames]);
+  }, [selectedWeekId, weeks, fetchGames, fetchWeekPoints, fetchParlay]);
 
   if (loading) {
     return <div className="min-h-screen flex items-center justify-center"><div className="text-gray-400">Loading...</div></div>;
@@ -134,6 +171,28 @@ export default function AdminPage() {
 
   const selectedWeek = weeks.find(w => w.id === selectedWeekId);
   const isWeekLocked = selectedWeek?.picks_lock_at ? new Date(selectedWeek.picks_lock_at) <= new Date() : false;
+
+  const handleSavePoints = async (userId: string, name: string) => {
+    if (!selectedWeekId) return;
+
+    setSavingPointsFor(userId);
+    setPointsStatus('');
+
+    const res = await fetch('/api/admin/week-points', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ weekId: selectedWeekId, userId, points: pointDrafts[userId] }),
+    });
+    const data = await res.json();
+
+    if (data.success) {
+      setPointsStatus(`${name} set to ${data.points} points. Winner/loser recalculated.`);
+      await fetchWeekPoints(selectedWeekId);
+    } else {
+      setPointsStatus(`Error: ${data.error}`);
+    }
+    setSavingPointsFor(null);
+  };
 
   const handleSetParlayResult = async (legId: string, result: ParlayResult | null) => {
     setParlayStatusMsg('');
@@ -318,6 +377,7 @@ export default function AdminPage() {
       if (selectedWeekId) {
         await fetchGames(selectedWeekId);
         await fetchParlay(selectedWeekId);
+        await fetchWeekPoints(selectedWeekId);
       }
     } else {
       setSettleStatus(`Error: ${data.error}`);
@@ -445,6 +505,7 @@ export default function AdminPage() {
                   onClick={() => {
                     setActiveTab(tab);
                     if (tab === 'picks') handleFetchPicks();
+                    if (tab === 'settle' && selectedWeekId) fetchWeekPoints(selectedWeekId);
                     if (tab === 'parlay' && selectedWeekId) fetchParlay(selectedWeekId);
                   }}
                   className={`flex-1 py-2.5 text-xs sm:text-sm font-medium rounded-md transition-colors capitalize ${
@@ -779,6 +840,74 @@ export default function AdminPage() {
                     {settleStatus}
                   </div>
                 )}
+
+                {/* Manual points */}
+                <div className="bg-gray-900 rounded-xl border border-gray-800">
+                  <div className="p-4 border-b border-gray-800">
+                    <h2 className="text-lg font-semibold">Points</h2>
+                    <p className="text-sm text-gray-400 mt-1">
+                      Edit a total by hand. Winner and loser are recalculated across the week after
+                      each save. Re-settling this week would overwrite these values.
+                    </p>
+                  </div>
+
+                  {weekPoints.length === 0 ? (
+                    <div className="p-6 text-center text-sm text-gray-500">
+                      No results yet — settle the week first.
+                    </div>
+                  ) : (
+                    <div className="divide-y divide-gray-800">
+                      {weekPoints.map(r => {
+                        const name = `${r.users.first_name} ${r.users.last_name}`;
+                        const draft = pointDrafts[r.user_id] ?? String(r.points);
+                        const changed = draft !== String(r.points);
+                        const isSaving = savingPointsFor === r.user_id;
+
+                        return (
+                          <div key={r.id} className="flex items-center justify-between gap-3 p-3">
+                            <div className="min-w-0">
+                              <div className="text-white font-medium truncate">{name}</div>
+                              <div className="flex gap-2 mt-0.5">
+                                {r.is_weekly_winner && (
+                                  <span className="text-xs text-green-400">🏆 Winner</span>
+                                )}
+                                {r.is_weekly_loser && (
+                                  <span className="text-xs text-red-400">💀 Loser</span>
+                                )}
+                              </div>
+                            </div>
+
+                            <div className="flex items-center gap-2 shrink-0">
+                              <input
+                                type="number"
+                                value={draft}
+                                onChange={(e) =>
+                                  setPointDrafts(prev => ({ ...prev, [r.user_id]: e.target.value }))
+                                }
+                                className="bg-gray-800 border border-gray-700 rounded-lg px-2 py-1.5 text-white w-20 text-center font-mono focus:outline-none focus:border-gray-500"
+                              />
+                              <button
+                                onClick={() => handleSavePoints(r.user_id, name)}
+                                disabled={!changed || isSaving}
+                                className="px-3 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium disabled:opacity-30 disabled:cursor-not-allowed"
+                              >
+                                {isSaving ? '…' : 'Save'}
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  {pointsStatus && (
+                    <div className={`p-3 border-t border-gray-800 text-sm ${
+                      pointsStatus.startsWith('Error') ? 'text-red-400' : 'text-green-400'
+                    }`}>
+                      {pointsStatus}
+                    </div>
+                  )}
+                </div>
 
                 {/* Show games with scores */}
                 {games.length > 0 && (
