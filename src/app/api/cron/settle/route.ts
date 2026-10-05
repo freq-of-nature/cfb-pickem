@@ -1,8 +1,10 @@
 import { NextResponse } from 'next/server';
 import { getServiceClient } from '@/lib/supabase';
+import { gradeParlayForWeek } from '@/lib/parlay-settle';
 
-// This endpoint is called by Vercel Cron on Sunday mornings
-// It auto-fetches scores and settles any locked, unsettled weeks
+// Called by Vercel Cron daily at 14:00 UTC (see vercel.json).
+// It auto-fetches scores and settles any locked, unsettled weeks. Running daily
+// is what lets parlay legs grade as their games finish, instead of all at once.
 
 export async function GET(request: Request) {
   try {
@@ -54,6 +56,14 @@ export async function GET(request: Request) {
         .from('games')
         .select('*')
         .eq('week_id', week.id);
+
+      // Grade parlay legs off the feed we already have. Deliberately ahead of
+      // every early-exit below: parlay legs are independent of the slate, so they
+      // should still grade when the slate is incomplete or its query failed.
+      // Because this cron runs daily, a Thursday leg grades Friday morning rather
+      // than waiting for the whole slate (by which point the feed's 3-day
+      // lookback may have dropped the game).
+      const parlay = await gradeParlayForWeek(week.id, apiScores);
 
       if (!games) continue;
 
@@ -115,6 +125,7 @@ export async function GET(request: Request) {
           status: 'partial',
           scored: gamesScored,
           total: games.length,
+          parlay,
         });
         continue;
       }
@@ -189,6 +200,7 @@ export async function GET(request: Request) {
         status: 'settled',
         scored: gamesScored,
         total: games.length,
+        parlay,
       });
     }
 

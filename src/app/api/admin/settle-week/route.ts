@@ -1,10 +1,16 @@
 import { NextResponse } from 'next/server';
 import { getServiceClient } from '@/lib/supabase';
+import { gradeParlayForWeek } from '@/lib/parlay-settle';
+import type { ParlayGradeSummary } from '@/lib/parlay-settle';
 
 export async function POST(request: Request) {
   try {
     const { weekId, autoFetch } = await request.json();
     const supabase = getServiceClient();
+
+    // Only populated on an autoFetch run — grading needs the scores feed, which
+    // "Settle with Current Scores" never fetches.
+    let parlay: ParlayGradeSummary | null = null;
 
     // If autoFetch is true, pull scores from the Odds API
     if (autoFetch) {
@@ -22,6 +28,9 @@ export async function POST(request: Request) {
       }
 
       const apiScores = await scoresRes.json();
+
+      // Grade the week's parlay legs off the same feed — no extra API credits.
+      parlay = await gradeParlayForWeek(weekId, apiScores);
 
       // Get games for this week
       const { data: games } = await supabase
@@ -219,6 +228,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json({
       success: true,
+      parlay,
       results: Object.entries(userCounts).map(([userId, count]) => ({
         userId,
         points: count,

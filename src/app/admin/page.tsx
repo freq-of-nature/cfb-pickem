@@ -5,14 +5,27 @@ import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import NavBar from '@/components/NavBar';
 import { supabase } from '@/lib/supabase';
-import { Week, Game } from '@/types';
+import { Week, Game, ParlayResult } from '@/types';
+import { formatSpread as formatParlaySpread } from '@/lib/parlay';
 
-type AdminTab = 'slate' | 'picks' | 'settle' | 'messages';
+type AdminTab = 'slate' | 'picks' | 'settle' | 'parlay' | 'messages';
 
 interface AdminPickUser {
   id: string;
   first_name: string;
   last_name: string;
+}
+
+interface AdminParlayLeg {
+  id: string;
+  user_id: string;
+  team: string;
+  spread_value: number;
+  result: ParlayResult | null;
+  opponent: string | null;
+  team_score: number | null;
+  opp_score: number | null;
+  users: { first_name: string; last_name: string };
 }
 
 interface AdminPick {
@@ -47,6 +60,10 @@ export default function AdminPage() {
   // Settle tab state
   const [settleStatus, setSettleStatus] = useState('');
 
+  // Parlay tab state
+  const [parlayLegs, setParlayLegs] = useState<AdminParlayLeg[]>([]);
+  const [parlayStatusMsg, setParlayStatusMsg] = useState('');
+
   // Reminder state
   const [reminderStatus, setReminderStatus] = useState('');
 
@@ -75,6 +92,13 @@ export default function AdminPage() {
       .eq('week_id', weekId)
       .order('kickoff_time', { ascending: true });
     if (data) setGames(data);
+  }, []);
+
+  const fetchParlay = useCallback(async (weekId: number) => {
+    const res = await fetch(`/api/parlay?weekId=${weekId}`);
+    const data = await res.json();
+    if (data.success) setParlayLegs(data.legs);
+    else setParlayStatusMsg(`Error: ${data.error}`);
   }, []);
 
   useEffect(() => {
@@ -110,6 +134,21 @@ export default function AdminPage() {
 
   const selectedWeek = weeks.find(w => w.id === selectedWeekId);
   const isWeekLocked = selectedWeek?.picks_lock_at ? new Date(selectedWeek.picks_lock_at) <= new Date() : false;
+
+  const handleSetParlayResult = async (legId: string, result: ParlayResult | null) => {
+    setParlayStatusMsg('');
+    const res = await fetch('/api/admin/set-parlay-result', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ legId, result }),
+    });
+    const data = await res.json();
+    if (data.success) {
+      if (selectedWeekId) await fetchParlay(selectedWeekId);
+    } else {
+      setParlayStatusMsg(`Error: ${data.error}`);
+    }
+  };
 
   const handleCreateWeek = async () => {
     setSlateStatus('Creating week...');
@@ -264,9 +303,22 @@ export default function AdminPage() {
     if (data.success) {
       const winners = data.results.filter((r: { isWinner: boolean }) => r.isWinner).length;
       const losers = data.results.filter((r: { isLoser: boolean }) => r.isLoser).length;
-      setSettleStatus(`Week settled! ${winners} winner(s), ${losers} loser(s). Don't forget to set the roast message!`);
+
+      let statusMsg = `Week settled! ${winners} winner(s), ${losers} loser(s).`;
+      if (data.parlay) {
+        statusMsg += ` Parlay: ${data.parlay.graded} leg(s) graded`;
+        statusMsg += data.parlay.pending > 0
+          ? `, ${data.parlay.pending} still pending — set those on the Parlay tab.`
+          : '.';
+      }
+      statusMsg += ` Don't forget to set the roast message!`;
+
+      setSettleStatus(statusMsg);
       await fetchWeeks();
-      if (selectedWeekId) await fetchGames(selectedWeekId);
+      if (selectedWeekId) {
+        await fetchGames(selectedWeekId);
+        await fetchParlay(selectedWeekId);
+      }
     } else {
       setSettleStatus(`Error: ${data.error}`);
     }
@@ -387,15 +439,19 @@ export default function AdminPage() {
           <>
             {/* Tabs */}
             <div className="flex rounded-lg bg-gray-900 border border-gray-800 p-1 mb-6">
-              {(['slate', 'picks', 'settle', 'messages'] as AdminTab[]).map(tab => (
+              {(['slate', 'picks', 'settle', 'parlay', 'messages'] as AdminTab[]).map(tab => (
                 <button
                   key={tab}
-                  onClick={() => { setActiveTab(tab); if (tab === 'picks') handleFetchPicks(); }}
-                  className={`flex-1 py-2.5 text-sm font-medium rounded-md transition-colors capitalize ${
+                  onClick={() => {
+                    setActiveTab(tab);
+                    if (tab === 'picks') handleFetchPicks();
+                    if (tab === 'parlay' && selectedWeekId) fetchParlay(selectedWeekId);
+                  }}
+                  className={`flex-1 py-2.5 text-xs sm:text-sm font-medium rounded-md transition-colors capitalize ${
                     activeTab === tab ? 'bg-gray-700 text-white' : 'text-gray-400 hover:text-gray-300'
                   }`}
                 >
-                  {tab === 'slate' ? '📋 Slate' : tab === 'picks' ? '👥 Picks' : tab === 'settle' ? '⚖️ Settle' : '💬 Messages'}
+                  {tab === 'slate' ? '📋 Slate' : tab === 'picks' ? '👥 Picks' : tab === 'settle' ? '⚖️ Settle' : tab === 'parlay' ? '🎰 Parlay' : '💬 Messages'}
                 </button>
               ))}
             </div>
@@ -768,6 +824,87 @@ export default function AdminPage() {
                     </div>
                   </div>
                 )}
+              </div>
+            )}
+
+            {/* PARLAY TAB */}
+            {activeTab === 'parlay' && (
+              <div className="space-y-4">
+                <div className="bg-gray-900 rounded-xl border border-gray-800 p-4">
+                  <h2 className="text-lg font-semibold mb-2">Week {selectedWeek?.week_number} Parlay</h2>
+                  <p className="text-sm text-gray-400">
+                    Legs grade automatically when scores are fetched. A hand-typed or ambiguous
+                    team name (&quot;Miami&quot;) can&apos;t be matched safely and stays pending —
+                    set those by hand here.
+                  </p>
+                </div>
+
+                {parlayStatusMsg && (
+                  <div className="rounded-lg p-3 text-sm bg-red-400/10 text-red-400">{parlayStatusMsg}</div>
+                )}
+
+                <div className="bg-gray-900 rounded-xl border border-gray-800">
+                  {parlayLegs.length === 0 ? (
+                    <div className="p-6 text-center text-sm text-gray-500">No legs submitted for this week.</div>
+                  ) : (
+                    <div className="divide-y divide-gray-800">
+                      {parlayLegs.map(leg => (
+                        <div key={leg.id} className="p-4">
+                          <div className="flex items-start justify-between gap-3 mb-3">
+                            <div className="min-w-0">
+                              <div className="text-xs text-gray-500">
+                                {leg.users.first_name} {leg.users.last_name}
+                              </div>
+                              <div className="text-white font-medium">
+                                {leg.team}{' '}
+                                <span className="text-yellow-400 font-mono">
+                                  {formatParlaySpread(Number(leg.spread_value))}
+                                </span>
+                              </div>
+                              {leg.opponent && (
+                                <div className="text-xs text-gray-500 mt-0.5">
+                                  vs {leg.opponent} · {leg.team_score}–{leg.opp_score}
+                                </div>
+                              )}
+                            </div>
+                            <span className={`text-xs font-bold px-2 py-1 rounded shrink-0 ${
+                              leg.result === 'win' ? 'bg-green-900/40 text-green-400' :
+                              leg.result === 'loss' ? 'bg-red-900/40 text-red-400' :
+                              leg.result === 'push' ? 'bg-yellow-900/40 text-yellow-400' :
+                              'bg-gray-800 text-gray-500'
+                            }`}>
+                              {leg.result ? leg.result.toUpperCase() : 'PENDING'}
+                            </span>
+                          </div>
+
+                          <div className="flex gap-2">
+                            {([
+                              ['win', 'W', 'bg-green-600 hover:bg-green-700'],
+                              ['loss', 'L', 'bg-red-600 hover:bg-red-700'],
+                              ['push', 'Push', 'bg-yellow-600 hover:bg-yellow-700'],
+                            ] as [ParlayResult, string, string][]).map(([value, label, color]) => (
+                              <button
+                                key={value}
+                                onClick={() => handleSetParlayResult(leg.id, value)}
+                                disabled={leg.result === value}
+                                className={`flex-1 py-1.5 text-white rounded-lg transition-colors text-sm font-medium disabled:opacity-40 ${color}`}
+                              >
+                                {label}
+                              </button>
+                            ))}
+                            <button
+                              onClick={() => handleSetParlayResult(leg.id, null)}
+                              disabled={leg.result === null}
+                              className="flex-1 py-1.5 bg-gray-700 text-gray-300 rounded-lg hover:bg-gray-600 transition-colors text-sm font-medium disabled:opacity-40"
+                            >
+                              Clear
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
             )}
 

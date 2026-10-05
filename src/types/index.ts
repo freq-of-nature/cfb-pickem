@@ -56,6 +56,24 @@ export interface Pick {
   updated_at: string;
 }
 
+export type ParlayResult = 'win' | 'loss' | 'push';
+
+// One leg of the week's group parlay. Unique on (user_id, week_id) — one entry
+// per person per week, editable until picks lock.
+export interface ParlayPick {
+  id: string;
+  user_id: string;
+  week_id: number;
+  team: string;
+  spread_value: number;
+  result: ParlayResult | null;
+  opponent: string | null;
+  team_score: number | null;
+  opp_score: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface WeeklyResult {
   id: string;
   user_id: string;
