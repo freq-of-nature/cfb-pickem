@@ -6,6 +6,8 @@ import { useAuth } from '@/context/AuthContext';
 import NavBar from '@/components/NavBar';
 import { supabase } from '@/lib/supabase';
 import { Week, Game } from '@/types';
+import { isGameLocked } from '@/lib/lock';
+import { logoFor, LogoMap } from '@/lib/team-logos';
 
 interface PickMap {
   [gameId: string]: string; // gameId -> picked team name
@@ -43,8 +45,12 @@ export default function PicksPage() {
   const [games, setGames] = useState<Game[]>([]);
   const [myPicks, setMyPicks] = useState<PickMap>({});
   const [myResults, setMyResults] = useState<PickResult>({});
-  const [isLocked, setIsLocked] = useState(false);
-  const [saving, setSaving] = useState<string | null>(null); // gameId being saved
+  const [logos, setLogos] = useState<LogoMap>({});
+  // Re-render periodically so games lock on screen as they kick off
+  const [now, setNow] = useState(() => new Date());
+  // gameIds with a save in flight. Tracked per game so one game's save finishing
+  // never unlocks another game mid-save (which let two saves race).
+  const [saving, setSaving] = useState<Set<string>>(new Set());
   const [error, setError] = useState('');
 
   // View others state
@@ -71,6 +77,22 @@ export default function PicksPage() {
     }
   }, []);
 
+  const loadMyPicks = useCallback(async (weekId: number) => {
+    if (!userId) return;
+    const res = await fetch(`/api/picks?userId=${userId}&weekId=${weekId}`);
+    const data = await res.json();
+    if (data.success && data.picks) {
+      const pickMap: PickMap = {};
+      const resultMap: PickResult = {};
+      for (const pick of data.picks) {
+        pickMap[pick.game_id] = pick.picked_team;
+        resultMap[pick.game_id] = pick.is_correct;
+      }
+      setMyPicks(pickMap);
+      setMyResults(resultMap);
+    }
+  }, [userId]);
+
   const fetchWeekData = useCallback(async (weekId: number) => {
     // Fetch week info
     const { data: weekData } = await supabase
@@ -81,8 +103,6 @@ export default function PicksPage() {
 
     if (weekData) {
       setWeek(weekData);
-      const locked = weekData.picks_lock_at ? new Date(weekData.picks_lock_at) <= new Date() : false;
-      setIsLocked(locked);
     }
 
     // Fetch games
@@ -98,22 +118,8 @@ export default function PicksPage() {
       setGames(sorted);
     }
 
-    // Fetch my picks
-    if (userId) {
-      const res = await fetch(`/api/picks?userId=${userId}&weekId=${weekId}`);
-      const data = await res.json();
-      if (data.success && data.picks) {
-        const pickMap: PickMap = {};
-        const resultMap: PickResult = {};
-        for (const pick of data.picks) {
-          pickMap[pick.game_id] = pick.picked_team;
-          resultMap[pick.game_id] = pick.is_correct;
-        }
-        setMyPicks(pickMap);
-        setMyResults(resultMap);
-      }
-    }
-  }, [userId]);
+    await loadMyPicks(weekId);
+  }, [loadMyPicks]);
 
   useEffect(() => {
     if (!loading && !user && !isAdmin) {
@@ -124,6 +130,18 @@ export default function PicksPage() {
   useEffect(() => {
     if (userId) fetchWeeks();
   }, [userId, fetchWeeks]);
+
+  useEffect(() => {
+    fetch('/api/team-logos')
+      .then(res => res.json())
+      .then(data => { if (data.success) setLogos(data.logos); })
+      .catch(() => {}); // logos are cosmetic; placeholders show instead
+  }, []);
+
+  useEffect(() => {
+    const id = setInterval(() => setNow(new Date()), 30_000);
+    return () => clearInterval(id);
+  }, []);
 
   useEffect(() => {
     if (allWeeks.length > 0 && viewingWeekId === null) {
@@ -143,64 +161,75 @@ export default function PicksPage() {
 
   const pickCount = Object.keys(myPicks).length;
 
+  const isLocked = (game: Game) => isGameLocked(game.kickoff_time, week?.picks_lock_at ?? null, now);
+  const lockedCount = games.filter(isLocked).length;
+  const allLocked = games.length > 0 && lockedCount === games.length;
+
   const handlePick = async (gameId: string, team: string) => {
-    if (isLocked || !userId) return;
-
-    const currentPick = myPicks[gameId];
-
-    // If tapping same team, deselect
-    if (currentPick === team) {
-      setSaving(gameId);
-      setError('');
-      const newPicks = { ...myPicks };
-      delete newPicks[gameId];
-      setMyPicks(newPicks);
-
-      const res = await fetch('/api/picks', {
-        method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId, gameId }),
-      });
-      const data = await res.json();
-      if (!data.success) {
-        // Revert
-        setMyPicks(prev => ({ ...prev, [gameId]: team }));
-        setError(data.error);
-      }
-      setSaving(null);
+    const game = games.find(g => g.id === gameId);
+    if (!game || !userId) return;
+    if (isLocked(game)) {
+      setError('This game has already kicked off.');
       return;
     }
 
-    // If switching pick on same game, no count change needed
-    // If new pick and already at 10, block
+    if (saving.has(gameId)) return;
+
+    const currentPick = myPicks[gameId];
+    const deselecting = currentPick === team;
+
+    // If new pick and already at 10, block (switching sides doesn't change the count)
     if (!currentPick && pickCount >= 10) {
       setError('Maximum 10 picks. Deselect a game first.');
       return;
     }
 
     // Optimistically update
-    setSaving(gameId);
+    setSaving(prev => new Set(prev).add(gameId));
     setError('');
-    setMyPicks(prev => ({ ...prev, [gameId]: team }));
-
-    const res = await fetch('/api/picks', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ userId, gameId, pickedTeam: team }),
+    setMyPicks(prev => {
+      const next = { ...prev };
+      if (deselecting) delete next[gameId];
+      else next[gameId] = team;
+      return next;
     });
-    const data = await res.json();
-    if (!data.success) {
-      // Revert
-      if (currentPick) {
-        setMyPicks(prev => ({ ...prev, [gameId]: currentPick }));
-      } else {
-        const newPicks = { ...myPicks };
-        delete newPicks[gameId];
-        setMyPicks(newPicks);
-      }
-      setError(data.error);
+
+    let errorMessage = '';
+    try {
+      const res = await fetch('/api/picks', {
+        method: deselecting ? 'DELETE' : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(deselecting ? { userId, gameId } : { userId, gameId, pickedTeam: team }),
+      });
+      const data = await res.json();
+      if (!data.success) errorMessage = data.error || 'Could not save your pick.';
+    } catch {
+      // Network drop or a non-JSON error page (e.g. a timeout)
+      errorMessage = 'Could not save your pick — check your connection and try again.';
     }
-    setSaving(null);
+
+    if (errorMessage) {
+      setError(errorMessage);
+      // Don't guess what the server has — reload it so the screen matches what's saved
+      if (viewingWeekId) {
+        try {
+          await loadMyPicks(viewingWeekId);
+        } catch {
+          setMyPicks(prev => {
+            const next = { ...prev };
+            if (currentPick) next[gameId] = currentPick;
+            else delete next[gameId];
+            return next;
+          });
+        }
+      }
+    }
+
+    setSaving(prev => {
+      const next = new Set(prev);
+      next.delete(gameId);
+      return next;
+    });
   };
 
   const handleViewOthers = async () => {
@@ -294,17 +323,14 @@ export default function PicksPage() {
             <div className="flex items-center justify-between mb-4">
               <div>
                 <h1 className="text-xl font-bold">Week {week.week_number}</h1>
-                {isLocked ? (
-                  <p className="text-sm text-yellow-400">🔒 Picks locked</p>
-                ) : week.picks_lock_at ? (
+                {allLocked ? (
+                  <p className="text-sm text-yellow-400">🔒 All games locked</p>
+                ) : (
                   <p className="text-sm text-gray-400">
-                    Locks {new Date(week.picks_lock_at).toLocaleString('en-US', {
-                      weekday: 'short', month: 'short', day: 'numeric',
-                      hour: 'numeric', minute: '2-digit',
-                      timeZone: 'America/New_York', timeZoneName: 'short',
-                    })}
+                    Games lock at kickoff
+                    {lockedCount > 0 && <span className="text-yellow-400"> · {lockedCount} locked</span>}
                   </p>
-                ) : null}
+                )}
               </div>
 
               {/* Pick Counter */}
@@ -319,8 +345,8 @@ export default function PicksPage() {
               )}
             </div>
 
-            {/* View Others Toggle */}
-            {isLocked && (
+            {/* View Others Toggle — picks are revealed per game once it kicks off */}
+            {lockedCount > 0 && (
               <div className="flex gap-2 mb-4">
                 <button
                   onClick={() => { setShowOthers(false); setSelectedUserId(null); }}
@@ -418,11 +444,16 @@ export default function PicksPage() {
             {/* Games List */}
             {(!showOthers || selectedUserId) && (
               <div className="space-y-3">
-                {games.map(game => {
+                {showOthers && !allLocked && (
+                  <p className="text-xs text-gray-500">Showing games that have kicked off. The rest stay hidden until kickoff.</p>
+                )}
+                {games.filter(game => !showOthers || isLocked(game)).map(game => {
                   const activePicks = showOthers ? selectedUserPickMap : myPicks;
                   const activeResults = showOthers ? selectedUserResultMap : myResults;
-                  const isSaving = saving === game.id;
+                  const isSaving = saving.has(game.id);
                   const isAway = game.spread_team === game.away_team;
+                  const locked = isLocked(game);
+                  const canPick = !locked && !showOthers;
 
                   return (
                     <div
@@ -443,24 +474,29 @@ export default function PicksPage() {
                       {/* Game info bar */}
                       <div className="flex items-center justify-between px-3 py-1.5 bg-gray-800/50">
                         <span className="text-xs text-gray-500">{formatKickoff(game.kickoff_time)}</span>
-                        {game.is_final && (
+                        {game.is_final ? (
                           <span className="text-xs text-green-400 font-medium">
                             Final: {game.away_score}–{game.home_score}
                           </span>
-                        )}
+                        ) : locked ? (
+                          <span className="text-xs text-yellow-400 font-medium">🔒 Locked</span>
+                        ) : null}
                       </div>
 
                       {/* Pick buttons */}
                       <div className="p-3 space-y-2">
                         {/* Away team */}
                         <button
-                          onClick={() => !showOthers && handlePick(game.id, game.away_team)}
-                          disabled={isLocked || showOthers || isSaving}
-                          className={`w-full flex items-center justify-between px-3 py-3 rounded-lg border transition-all ${
+                          onClick={() => canPick && handlePick(game.id, game.away_team)}
+                          disabled={!canPick || isSaving}
+                          className={`w-full flex items-center justify-between gap-3 px-3 py-3 rounded-lg border transition-all ${
                             getPickStyle(game.id, game.away_team, activePicks, activeResults)
-                          } ${!isLocked && !showOthers ? 'cursor-pointer active:scale-[0.98]' : 'cursor-default'}`}
+                          } ${canPick ? 'cursor-pointer active:scale-[0.98]' : 'cursor-default'}`}
                         >
-                          <span className="font-medium text-sm">{game.away_team}</span>
+                          <span className="flex items-center gap-2.5 min-w-0">
+                            <TeamLogo src={logoFor(logos, game.away_team)} />
+                            <span className="font-medium text-sm truncate">{game.away_team}</span>
+                          </span>
                           <span className="text-xs font-mono opacity-75">
                             {isAway ? formatSpread(game) : `+${Math.abs(game.spread_value)}`}
                           </span>
@@ -468,13 +504,16 @@ export default function PicksPage() {
 
                         {/* Home team */}
                         <button
-                          onClick={() => !showOthers && handlePick(game.id, game.home_team)}
-                          disabled={isLocked || showOthers || isSaving}
-                          className={`w-full flex items-center justify-between px-3 py-3 rounded-lg border transition-all ${
+                          onClick={() => canPick && handlePick(game.id, game.home_team)}
+                          disabled={!canPick || isSaving}
+                          className={`w-full flex items-center justify-between gap-3 px-3 py-3 rounded-lg border transition-all ${
                             getPickStyle(game.id, game.home_team, activePicks, activeResults)
-                          } ${!isLocked && !showOthers ? 'cursor-pointer active:scale-[0.98]' : 'cursor-default'}`}
+                          } ${canPick ? 'cursor-pointer active:scale-[0.98]' : 'cursor-default'}`}
                         >
-                          <span className="font-medium text-sm">{game.home_team}</span>
+                          <span className="flex items-center gap-2.5 min-w-0">
+                            <TeamLogo src={logoFor(logos, game.home_team)} />
+                            <span className="font-medium text-sm truncate">{game.home_team}</span>
+                          </span>
                           <span className="text-xs font-mono opacity-75">
                             {!isAway ? formatSpread(game) : `+${Math.abs(game.spread_value)}`}
                           </span>
@@ -490,4 +529,10 @@ export default function PicksPage() {
       </main>
     </>
   );
+}
+
+function TeamLogo({ src }: { src: string | null }) {
+  if (!src) return <span className="h-7 w-7 shrink-0 rounded-full bg-gray-700" />;
+  // eslint-disable-next-line @next/next/no-img-element
+  return <img src={src} alt="" className="h-7 w-7 shrink-0 object-contain" loading="lazy" />;
 }

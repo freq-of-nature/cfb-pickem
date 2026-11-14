@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getServiceClient } from '@/lib/supabase';
+import { isGameLocked } from '@/lib/lock';
 
 export async function GET(request: Request) {
   try {
@@ -12,7 +13,6 @@ export async function GET(request: Request) {
 
     const supabase = getServiceClient();
 
-    // Check if picks are locked for this week
     const { data: week } = await supabase
       .from('weeks')
       .select('picks_lock_at')
@@ -23,12 +23,8 @@ export async function GET(request: Request) {
       return NextResponse.json({ success: false, error: 'Week not found' }, { status: 404 });
     }
 
-    if (week.picks_lock_at && new Date(week.picks_lock_at) > new Date()) {
-      return NextResponse.json({ success: false, error: 'Picks are not yet locked — cannot view others\' picks' }, { status: 403 });
-    }
-
     // Fetch all picks for this week with user info
-    const { data: picks, error } = await supabase
+    const { data: allPicks, error } = await supabase
       .from('picks')
       .select(`
         id,
@@ -37,7 +33,7 @@ export async function GET(request: Request) {
         picked_team,
         is_correct,
         users!inner(id, first_name, last_name, school_slug),
-        games!inner(week_id)
+        games!inner(week_id, kickoff_time)
       `)
       .eq('games.week_id', parseInt(weekId));
 
@@ -45,13 +41,18 @@ export async function GET(request: Request) {
       return NextResponse.json({ success: false, error: error.message }, { status: 500 });
     }
 
+    // Picks are revealed game by game as each one kicks off
+    const picks = (allPicks || []).filter(p =>
+      isGameLocked((p.games as unknown as { kickoff_time: string | null }).kickoff_time, week.picks_lock_at)
+    );
+
     // Also fetch all users with their school colors
     const { data: users } = await supabase
       .from('users')
       .select('id, first_name, last_name, school_slug, school_colors(primary_color, secondary_color, display_name)')
       .order('first_name');
 
-    return NextResponse.json({ success: true, picks: picks || [], users: users || [] });
+    return NextResponse.json({ success: true, picks, users: users || [] });
   } catch {
     return NextResponse.json({ success: false, error: 'Server error' }, { status: 500 });
   }

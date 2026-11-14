@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getServiceClient } from '@/lib/supabase';
+import { isGameLocked } from '@/lib/lock';
 
 // GET - fetch a user's picks for a given week
 export async function GET(request: Request) {
@@ -41,10 +42,10 @@ export async function POST(request: Request) {
 
     const supabase = getServiceClient();
 
-    // Check if picks are locked for this game's week
+    // Each game locks at kickoff
     const { data: game } = await supabase
       .from('games')
-      .select('week_id, weeks!inner(picks_lock_at)')
+      .select('week_id, kickoff_time, weeks!inner(picks_lock_at)')
       .eq('id', gameId)
       .single();
 
@@ -52,9 +53,9 @@ export async function POST(request: Request) {
       return NextResponse.json({ success: false, error: 'Game not found' }, { status: 404 });
     }
 
-    const lockAt = (game as unknown as { weeks: { picks_lock_at: string } }).weeks.picks_lock_at;
-    if (lockAt && new Date(lockAt) <= new Date()) {
-      return NextResponse.json({ success: false, error: 'Picks are locked for this week' }, { status: 403 });
+    const weekLockAt = (game as unknown as { weeks: { picks_lock_at: string | null } }).weeks.picks_lock_at;
+    if (isGameLocked(game.kickoff_time, weekLockAt)) {
+      return NextResponse.json({ success: false, error: 'This game has already kicked off' }, { status: 403 });
     }
 
     // Check pick count for this user/week (max 10)
@@ -107,10 +108,10 @@ export async function DELETE(request: Request) {
 
     const supabase = getServiceClient();
 
-    // Check if picks are locked
+    // Each game locks at kickoff
     const { data: game } = await supabase
       .from('games')
-      .select('week_id, weeks!inner(picks_lock_at)')
+      .select('week_id, kickoff_time, weeks!inner(picks_lock_at)')
       .eq('id', gameId)
       .single();
 
@@ -118,9 +119,9 @@ export async function DELETE(request: Request) {
       return NextResponse.json({ success: false, error: 'Game not found' }, { status: 404 });
     }
 
-    const lockAt = (game as unknown as { weeks: { picks_lock_at: string } }).weeks.picks_lock_at;
-    if (lockAt && new Date(lockAt) <= new Date()) {
-      return NextResponse.json({ success: false, error: 'Picks are locked for this week' }, { status: 403 });
+    const weekLockAt = (game as unknown as { weeks: { picks_lock_at: string | null } }).weeks.picks_lock_at;
+    if (isGameLocked(game.kickoff_time, weekLockAt)) {
+      return NextResponse.json({ success: false, error: 'This game has already kicked off' }, { status: 403 });
     }
 
     const { error } = await supabase

@@ -25,7 +25,7 @@ export async function POST(request: Request) {
       if (!scoresRes.ok) {
         const errorText = await scoresRes.text();
         return NextResponse.json({ success: false, error: `Scores API request failed: ${errorText}` }, { status: 502 });
-      }
+       }
 
       const apiScores = await scoresRes.json();
 
